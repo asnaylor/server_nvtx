@@ -78,7 +78,8 @@ ADD ${CHANNEL_URL} "C:\tmp\VisualStudio.chman"
 # Download the Build Tools bootstrapper.
 ADD https://aka.ms/vs/17/release/vs_buildtools.exe vs_buildtools.exe
 # Install Build Tools with the Microsoft.VisualStudio.Workload.VCTools workload, including recommended.
-RUN vs_buildtools.exe --quiet --wait --norestart --nocache install --installPath "c:\BuildTools" --channelUri "C:\tmp\VisualStudio.chman" --installChannelUri "C:\tmp\VisualStudio.chman" --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --locale "En-us"  
+ARG VS_INSTALL_PATH_WP="C:\BuildTools"
+RUN vs_buildtools.exe --quiet --wait --norestart --nocache install --installPath ${VS_INSTALL_PATH_WP} --channelUri "C:\tmp\VisualStudio.chman" --installChannelUri "C:\tmp\VisualStudio.chman" --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --locale "En-us"  
 
 LABEL BUILDTOOLS_VERSION=${BUILDTOOLS_VERSION}
 

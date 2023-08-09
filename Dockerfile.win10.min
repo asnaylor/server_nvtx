@@ -68,6 +68,9 @@ RUN pip install grpcio-tools
 
 LABEL PYTHON_VERSION=${PYTHON_VERSION}
 
+#
+# Installing Visual Studio BuildTools: VS17 2022 
+#
 ARG BUILDTOOLS_VERSION
 # Download collect.exe in case of an install failure.
 ADD https://aka.ms/vscollect.exe "C:\tmp\collect.exe"
@@ -126,7 +129,7 @@ ADD ${CUDA_SOURCE} cuda_${CUDA_VERSION}_windows_network.exe
 RUN cuda_%CUDA_VERSION%_windows_network.exe -s %CUDA_PACKAGES%
 # Copy the CUDA visualstudio integration from where it was installed
 # into the appropriate place in BuildTools
-RUN copy "%CUDA_INSTALL_ROOT_WP%\extras\visual_studio_integration\MSBuildExtensions\*" "%VS_INSTALL_PATH_WP%\MSBuild\Microsoft\VC\v160\BuildCustomizations"
+RUN copy "%CUDA_INSTALL_ROOT_WP%\extras\visual_studio_integration\MSBuildExtensions\*" "%VS_INSTALL_PATH_WP%\MSBuild\Microsoft\VC\v170\BuildCustomizations"
 
 RUN setx PATH "%CUDA_INSTALL_ROOT_WP%\bin;%PATH%"
 

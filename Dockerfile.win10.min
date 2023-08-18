@@ -48,7 +48,7 @@ ARG CMAKE_SOURCE=https://github.com/Kitware/CMake/releases/download/v${CMAKE_VER
 
 ADD ${CMAKE_SOURCE} ${CMAKE_FILE}.zip
 RUN unzip %CMAKE_FILE%.zip
-RUN move %CMAKE_FILE% CMake
+RUN move %CMAKE_FILE% "c:\CMake" 
 RUN setx PATH "c:\CMake\bin;%PATH%"
 
 ENV CMAKE_TOOLCHAIN_FILE /vcpkg/scripts/buildsystems/vcpkg.cmake

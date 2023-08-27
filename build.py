@@ -726,20 +726,18 @@ def install_dcgm_libraries(dcgm_version, target_machine):
             return '''
 ENV DCGM_VERSION {}
 # Install DCGM. Steps from https://developer.nvidia.com/dcgm#Downloads
-RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/sbsa/cuda-ubuntu2004.pin && \
-    mv cuda-ubuntu2004.pin /etc/apt/preferences.d/cuda-repository-pin-600 && \
-    apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/sbsa/7fa2af80.pub && \
-    add-apt-repository "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/sbsa/ /" && \
+RUN apt-key del 7fa2af80 && \
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/sbsa/cuda-keyring_1.0-1_all.deb && \
+    dpkg -i cuda-keyring_1.0-1_all.deb && \
     apt-get update && apt-get install -y datacenter-gpu-manager=1:{}
 '''.format(dcgm_version, dcgm_version)
         else:
             return '''
 ENV DCGM_VERSION {}
 # Install DCGM. Steps from https://developer.nvidia.com/dcgm#Downloads
-RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-ubuntu2004.pin && \
-    mv cuda-ubuntu2004.pin /etc/apt/preferences.d/cuda-repository-pin-600 && \
-    apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/7fa2af80.pub && \
-    add-apt-repository "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/ /" && \
+RUN apt-key del 7fa2af80 && \
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb && \
+    dpkg -i cuda-keyring_1.0-1_all.deb && \
     apt-get update && apt-get install -y datacenter-gpu-manager=1:{}
 '''.format(dcgm_version, dcgm_version)
 
@@ -1009,8 +1007,11 @@ RUN userdel tensorrt-server > /dev/null 2>&1 || true && \
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Common dependencies. FIXME (can any of these be conditional? For
-# example libcurl only needed for GCS?)
+# example libcurl only needed for GCS?) 
+# ADDED dconf-gsettings-backend as fix for dpkg error
 RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        dconf-gsettings-backend && \
     apt-get install -y --no-install-recommends \
             software-properties-common \
             libb64-0d \
@@ -1174,8 +1175,7 @@ def container_build(images, backends, repoagents, endpoints):
     ]
 
     cachefromargs = ['--cache-from={}'.format(k) for k in cachefrommap]
-    commonargs = [
-        'docker', 'build', '-f',
+    commonargs = container_build_flags + [ '-f',
         os.path.join(FLAGS.build_dir, 'Dockerfile.buildbase')
     ]
     if not FLAGS.no_container_pull:
@@ -1197,20 +1197,20 @@ def container_build(images, backends, repoagents, endpoints):
         p = subprocess.Popen(commonargs + cachefromargs +
                              ['-t', 'tritonserver_buildbase', '.'])
         p.wait()
-        fail_if(p.returncode != 0, 'docker build tritonserver_buildbase failed')
+        fail_if(p.returncode != 0, f'{FLAGS.container_software} build tritonserver_buildbase failed')
 
         # Need to extract env from the base image so that we can
         # access library versions.
         buildbase_env_filepath = os.path.join(FLAGS.build_dir, 'buildbase_env')
         with open(buildbase_env_filepath, 'w') as f:
             if target_platform() == 'windows':
-                envargs = [
-                    'docker', 'run', '--rm', 'tritonserver_buildbase',
+                envargs = [FLAGS.container_software] + [
+                    'run', '--rm', 'tritonserver_buildbase',
                     'cmd.exe', '/c', 'set'
                 ]
             else:
-                envargs = [
-                    'docker', 'run', '--rm', 'tritonserver_buildbase', 'env'
+                envargs = [FLAGS.container_software] + [
+                    'run', '--rm', 'tritonserver_buildbase', 'env'
                 ]
             log_verbose('buildbase env {}'.format(envargs))
             p = subprocess.Popen(envargs, stdout=f)
@@ -1238,15 +1238,19 @@ def container_build(images, backends, repoagents, endpoints):
                     '--env', 'TRITONBUILD_{}={}'.format(k, buildbase_env[k])
                 ]
 
-        # Before attempting to run the new image, make sure any
-        # previous 'tritonserver_builder' container is removed.
-        client = docker.from_env(timeout=3600)
+        if FLAGS.container_software == 'docker':
+            # Before attempting to run the new image, make sure any
+            # previous 'tritonserver_builder' container is removed.
+            client = docker.from_env(timeout=3600)
 
-        try:
-            existing = client.containers.get('tritonserver_builder')
-            existing.remove(force=True)
-        except docker.errors.NotFound:
-            pass  # ignore
+            try:
+                existing = client.containers.get('tritonserver_builder')
+                existing.remove(force=True)
+            except docker.errors.NotFound:
+                pass  # ignore
+        else:
+            import time
+            time.sleep(5)
 
         # Next run build.py inside the container with the same flags
         # as was used to run this instance, except:
@@ -1285,8 +1289,8 @@ def container_build(images, backends, repoagents, endpoints):
         runargs += ['--build-dir', build_dir]
         runargs += ['--install-dir', install_dir]
 
-        dockerrunargs = [
-            'docker', 'run', '--name', 'tritonserver_builder', '-w',
+        dockerrunargs =  [ FLAGS.container_software, 
+            'run', '--name', 'tritonserver_builder', '-w',
             '/workspace'
         ]
         if target_platform() == 'windows':
@@ -1296,7 +1300,7 @@ def container_build(images, backends, repoagents, endpoints):
             dockerrunargs += [
                 '-v', '\\\\.\pipe\docker_engine:\\\\.\pipe\docker_engine'
             ]
-        else:
+        elif FLAGS.container_software == 'docker':
             dockerrunargs += ['-v', '/var/run/docker.sock:/var/run/docker.sock']
         dockerrunargs += dockerrunenvargs
         dockerrunargs += [
@@ -1307,9 +1311,10 @@ def container_build(images, backends, repoagents, endpoints):
         log_verbose(dockerrunargs)
         p = subprocess.Popen(dockerrunargs)
         p.wait()
-        fail_if(p.returncode != 0, 'docker run tritonserver_builder failed')
+        fail_if(p.returncode != 0, f'{FLAGS.container_software} run tritonserver_builder failed')
 
-        container = client.containers.get('tritonserver_builder')
+        if FLAGS.container_software == 'docker':
+            container = client.containers.get('tritonserver_builder')
 
         # It is possible to copy the install artifacts from the
         # container at this point (and, for example put them in the
@@ -1337,21 +1342,43 @@ def container_build(images, backends, repoagents, endpoints):
         #   2. Perform a docker build to create "tritonserver_build"
         #   from "tritonserver_builder_image" that is essentially
         #   identical but removes the mount.
-        try:
-            client.images.remove('tritonserver_builder_image', force=True)
-        except docker.errors.ImageNotFound:
-            pass  # ignore
+            try:
+                client.images.remove('tritonserver_builder_image', force=True)
+            except docker.errors.ImageNotFound:
+                pass  # ignore
 
-        container.commit('tritonserver_builder_image', 'latest')
-        container.remove(force=True)
+            container.commit('tritonserver_builder_image', 'latest')
+            container.remove(force=True)
+        
+            create_dockerfile_build(FLAGS.build_dir, 'Dockerfile.build', backends)
+            p = subprocess.Popen(container_build_flags + [
+                '-t', 'tritonserver_build', '-f',
+                os.path.join(FLAGS.build_dir, 'Dockerfile.build'), '.'
+            ])
+            p.wait()
+            fail_if(p.returncode != 0, f'{FLAGS.container_software} build tritonserver_build failed')
 
-        create_dockerfile_build(FLAGS.build_dir, 'Dockerfile.build', backends)
-        p = subprocess.Popen([
-            'docker', 'build', '-t', 'tritonserver_build', '-f',
-            os.path.join(FLAGS.build_dir, 'Dockerfile.build'), '.'
-        ])
-        p.wait()
-        fail_if(p.returncode != 0, 'docker build tritonserver_build failed')
+        else:
+            # Remove tritonserver_builder_image previous image if left over
+            p = subprocess.Popen([FLAGS.container_software, 
+                'rmi', 'tritonserver_build:latest'
+            ])
+            p.wait()
+
+            # Commit tritonserver_builder to image
+            p = subprocess.Popen([FLAGS.container_software, 
+                'commit', 'tritonserver_builder', 'tritonserver_build:latest'
+            ])
+            p.wait()
+            fail_if(p.returncode != 0, f'{FLAGS.container_software} commit tritonserver_builder tritonserver_build:latest failed')
+       
+            # Remove tritonserver_builder container
+            p = subprocess.Popen([FLAGS.container_software, 
+                'rm', 'tritonserver_builder',
+            ])
+            p.wait()
+            fail_if(p.returncode != 0, f'{FLAGS.container_software} rm tritonserver_builder failed')
+       
 
         # Final base image... this is a multi-stage build that uses
         # the install artifacts from the tritonserver_build
@@ -1363,12 +1390,11 @@ def container_build(images, backends, repoagents, endpoints):
             create_dockerfile_linux(FLAGS.build_dir, 'Dockerfile',
                                     dockerfileargmap, backends, repoagents,
                                     endpoints)
-        p = subprocess.Popen([
-            'docker', 'build', '-f',
+        p = subprocess.Popen(container_build_flags + [ '-f',
             os.path.join(FLAGS.build_dir, 'Dockerfile')
         ] + ['-t', 'tritonserver', '.'])
         p.wait()
-        fail_if(p.returncode != 0, 'docker build tritonserver failed')
+        fail_if(p.returncode != 0, f'{FLAGS.container_software} build tritonserver failed')
 
     except Exception as e:
         logging.error(traceback.format_exc())
@@ -1426,6 +1452,11 @@ if __name__ == '__main__':
                           required=False,
                           help='Enable verbose output.')
 
+    parser.add_argument('--container-software',
+                        default="docker",
+                        required=False,
+                        help='Which container softwar to use for the build. Default is docker.')
+    
     parser.add_argument('--no-container-build',
                         action="store_true",
                         required=False,
@@ -1699,6 +1730,10 @@ if __name__ == '__main__':
     if FLAGS.extra_backend_cmake_arg is None:
         FLAGS.extra_backend_cmake_arg = []
 
+    container_build_flags = [FLAGS.container_software, 'build']
+    if "podman" in FLAGS.container_software:
+        container_build_flags += ['--format', 'docker']
+
     # FLAGS.cmake_dir is required for non-container builds. For
     # container builds it is set above to the value appropriate for
     # building within the buildbase container.
@@ -1844,7 +1879,8 @@ if __name__ == '__main__':
     # build within a build container and then from that create a
     # tritonserver container holding the results of the build.
     if not FLAGS.no_container_build:
-        import docker
+        if FLAGS.container_software == 'docker':
+            import docker
 
         container_build(images, backends, repoagents, FLAGS.endpoint)
         sys.exit(0)

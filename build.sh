@@ -33,6 +33,7 @@ MIN_CUDA_COMPUTE="8.0"
     --enable-nvtx \
     --min-compute-capability=$MIN_CUDA_COMPUTE \
     --endpoint=http --endpoint=grpc \
+    --backend=ensemble --backend=python \
     -j $NCORES
 
-#    --backend=ensemble --backend=python \
+# --backend=pytorch

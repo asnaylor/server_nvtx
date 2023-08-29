@@ -474,7 +474,7 @@ def backend_cmake_args(images, components, be, install_dir, library_paths,
     elif be == 'tensorflow2':
         args = tensorflow_cmake_args(2, images, library_paths)
     elif be == 'python':
-        args = []
+        args = python_cmake_args()
     elif be == 'dali':
         args = dali_cmake_args()
     elif be == 'pytorch':
@@ -520,6 +520,14 @@ def backend_cmake_args(images, components, be, install_dir, library_paths,
 
     cargs += cmake_backend_extra_args(be)
     cargs.append('..')
+    return cargs
+
+
+def python_cmake_args():
+    cargs = [
+        cmake_backend_enable('python', 'TRITON_ENABLE_NVTX',
+                             FLAGS.enable_nvtx),
+    ]
     return cargs
 
 
@@ -892,6 +900,8 @@ RUN if [ -d /tmp/tritonbuild/onnxruntime ]; then \
 
 def create_dockerfile_linux(ddir, dockerfile_name, argmap, backends, repoagents,
                             endpoints):
+        
+
     df = '''
 #
 # Multistage build.
@@ -913,6 +923,18 @@ FROM ${{BUILD_IMAGE}} AS tritonserver_build
 FROM ${{BASE_IMAGE}}
 '''.format(argmap['TRITON_VERSION'], argmap['TRITON_CONTAINER_VERSION'],
            argmap['BASE_IMAGE'])
+
+    if 'pytorch' in backends:
+        pytorch_image = 'nvcr.io/nvidia/tritonserver:{}-py3'.format(
+                FLAGS.upstream_container_version)
+    
+        df += '''
+
+# Get Pytorch backend from pre-built container
+ARG PYTORCH_TRITON_CONTAINER={}
+FROM ${{PYTORCH_TRITON_CONTAINER}} AS triton_pytorch
+
+'''.format(pytorch_image)
 
     df += dockerfile_prepare_container_linux(argmap, backends, FLAGS.enable_gpu,
                                              target_machine())
@@ -954,6 +976,11 @@ COPY --chown=1000:1000 --from=tritonserver_build /workspace/build/sagemaker/serv
 COPY --chown=1000:1000 --from=tritonserver_build /tmp/tritonbuild/install/backends backends
 '''
             break
+
+    if 'pytorch' in backends:
+        df += '''
+COPY --chown=1000:1000 --from=triton_pytorch /opt/tritonserver/backends/pytorch/ backends/pytorch
+'''
 
     if len(repoagents) > 0:
         df += '''
@@ -1938,6 +1965,10 @@ if __name__ == '__main__':
     for be in backends:
         # Core backends are not built separately from core so skip...
         if (be in CORE_BACKENDS):
+            continue
+
+        #Pytorch will be copied from pre-built triton container
+        if be == 'pytorch':
             continue
 
         tagged_be_list = []

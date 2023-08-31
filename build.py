@@ -474,11 +474,11 @@ def backend_cmake_args(images, components, be, install_dir, library_paths,
     elif be == 'tensorflow2':
         args = tensorflow_cmake_args(2, images, library_paths)
     elif be == 'python':
-        args = python_cmake_args()
+        args = []
     elif be == 'dali':
         args = dali_cmake_args()
     elif be == 'pytorch':
-        args = pytorch_cmake_args(images)
+        args = [] #pytorch_cmake_args(images)
     elif be == 'armnn_tflite':
         args = armnn_tflite_cmake_args()
     elif be == 'fil':
@@ -520,14 +520,6 @@ def backend_cmake_args(images, components, be, install_dir, library_paths,
 
     cargs += cmake_backend_extra_args(be)
     cargs.append('..')
-    return cargs
-
-
-def python_cmake_args():
-    cargs = [
-        cmake_backend_enable('python', 'TRITON_ENABLE_NVTX',
-                             FLAGS.enable_nvtx),
-    ]
     return cargs
 
 
@@ -916,25 +908,25 @@ ARG BUILD_IMAGE=tritonserver_build
 ##  Build image
 ############################################################################
 FROM ${{BUILD_IMAGE}} AS tritonserver_build
-
-############################################################################
-##  Production stage: Create container with just inference server executable
-############################################################################
-FROM ${{BASE_IMAGE}}
 '''.format(argmap['TRITON_VERSION'], argmap['TRITON_CONTAINER_VERSION'],
            argmap['BASE_IMAGE'])
 
-    if 'pytorch' in backends:
+    if 'pytorch' in 'pytorch':
         pytorch_image = 'nvcr.io/nvidia/tritonserver:{}-py3'.format(
-                FLAGS.upstream_container_version)
-    
+                '22.02')
+
         df += '''
-
 # Get Pytorch backend from pre-built container
-ARG PYTORCH_TRITON_CONTAINER={}
-FROM ${{PYTORCH_TRITON_CONTAINER}} AS triton_pytorch
-
+FROM {} AS triton_pytorch
 '''.format(pytorch_image)
+
+    df += '''
+############################################################################
+##  Production stage: Create container with just inference server executable
+############################################################################
+FROM ${BASE_IMAGE}
+'''
+
 
     df += dockerfile_prepare_container_linux(argmap, backends, FLAGS.enable_gpu,
                                              target_machine())
@@ -1482,7 +1474,7 @@ if __name__ == '__main__':
     parser.add_argument('--container-software',
                         default="docker",
                         required=False,
-                        help='Which container softwar to use for the build. Default is docker.')
+                        help='Which container software to use for the build. Default is docker.')
     
     parser.add_argument('--no-container-build',
                         action="store_true",
@@ -1969,6 +1961,7 @@ if __name__ == '__main__':
 
         #Pytorch will be copied from pre-built triton container
         if be == 'pytorch':
+            log('skipping pytorch build as will be copied instead')
             continue
 
         tagged_be_list = []
